@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LeWM trial browser</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #161b22;
+      --border: #2a3038;
+      --fg: #d6dde6;
+      --muted: #7d8590;
+      --accent: #58a6ff;
+      --row-hover: #1c232c;
+      --row-sel: #213447;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--fg); font-size: 13px; }
+    #app { display: flex; height: 100vh; }
+    #left  { width: 520px; min-width: 360px; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--panel); }
+    #right { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+    h1 { font-size: 14px; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600; }
+    h1 span.count { color: var(--muted); font-weight: 400; margin-left: 6px; }
+    #filters { padding: 10px 14px; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+    #filters label { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
+    #filters input, #filters select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font: inherit; margin-top: 2px; }
+    .range-row { display: flex; gap: 4px; }
+    .range-row input { width: 50%; }
+    #table-wrap { flex: 1; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    thead th { position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--border); padding: 6px 8px; font-size: 11px; text-align: right; color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
+    thead th.sort-asc::after  { content: " ▲"; color: var(--accent); }
+    thead th.sort-desc::after { content: " ▼"; color: var(--accent); }
+    thead th:first-child, tbody td:first-child { text-align: left; }
+    tbody td { padding: 4px 8px; text-align: right; border-bottom: 1px solid transparent; }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover { background: var(--row-hover); }
+    tbody tr.selected { background: var(--row-sel); }
+    tbody tr.no-rrd { opacity: 0.45; cursor: not-allowed; }
+    .pill { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; }
+    .pill-sc      { background: #2a3a6e; color: #aaccff; }
+    .pill-sfp     { background: #225e29; color: #aaffaa; }
+    .pill-success { background: #225e29; color: #aaffaa; }
+    .pill-fail    { background: #5e2929; color: #ffaaaa; }
+    #viewer { flex: 1; width: 100%; min-height: 0; position: relative; }
+    #viewer canvas, #viewer > div { width: 100% !important; height: 100% !important; display: block; }
+    #empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="left">
+      <h1 id="title">trials <span class="count" id="count">…</span></h1>
+      <div id="filters">
+        <label>trial contains
+          <input type="text" id="f-search" placeholder="e.g. 7">
+        </label>
+        <label>plug_type
+          <select id="f-plug">
+            <option value="">all</option>
+          </select>
+        </label>
+        <label>success
+          <select id="f-success">
+            <option value="">all</option>
+            <option value="1">success only</option>
+            <option value="0">failure only</option>
+          </select>
+        </label>
+        <label>force_penalized
+          <select id="f-force">
+            <option value="">all</option>
+            <option value="1">penalized only</option>
+            <option value="0">unpenalized only</option>
+          </select>
+        </label>
+        <label>total_score
+          <div class="range-row">
+            <input type="number" id="f-smin" placeholder="min" step="any">
+            <input type="number" id="f-smax" placeholder="max" step="any">
+          </div>
+        </label>
+        <label>tier3
+          <div class="range-row">
+            <input type="number" id="f-t3min" placeholder="min" step="any">
+            <input type="number" id="f-t3max" placeholder="max" step="any">
+          </div>
+        </label>
+        <label>duration_s
+          <div class="range-row">
+            <input type="number" id="f-dmin" placeholder="min" step="any">
+            <input type="number" id="f-dmax" placeholder="max" step="any">
+          </div>
+        </label>
+      </div>
+      <div id="table-wrap">
+        <table>
+          <thead>
+            <tr id="head">
+              <!-- columns filled by JS -->
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="right">
+      <div id="empty">click an episode to load it</div>
+      <div id="viewer" style="display:none"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { WebViewer } from "https://unpkg.com/@rerun-io/web-viewer@0.26.2/index.js";
+
+    const COLUMNS = [
+      { key: "trial",        label: "trial",   fmt: v => v },
+      { key: "plug_type",    label: "plug",    fmt: v => `<span class="pill pill-${v}">${v}</span>` },
+      { key: "success",      label: "ok",      fmt: v => v ? `<span class="pill pill-success">✓</span>` : `<span class="pill pill-fail">✗</span>` },
+      { key: "force_penalized", label: "F!",   fmt: v => v ? `<span class="pill pill-fail">F</span>` : "" },
+      { key: "total_score",  label: "score",   fmt: v => v.toFixed(2) },
+      { key: "tier1",        label: "T1",      fmt: v => v.toFixed(2) },
+      { key: "tier2",        label: "T2",      fmt: v => v.toFixed(2) },
+      { key: "tier3",        label: "T3",      fmt: v => v.toFixed(2) },
+      { key: "duration_s",   label: "dur (s)", fmt: v => v.toFixed(1) },
+      { key: "frames",       label: "frames",  fmt: v => v },
+      { key: "image_hw",     label: "img",     fmt: v => v || "?" },
+      { key: "rrd_size_kb",  label: "kb",      fmt: v => v.toFixed(0) },
+    ];
+
+    let episodes = [];
+    let filtered = [];
+    let sortKey = "trial";
+    let sortDir = 1; // 1 asc, -1 desc
+    let selected = null;
+    let viewer = null;
+    let currentRrd = null;
+
+    function buildHead() {
+      const tr = document.getElementById("head");
+      tr.innerHTML = COLUMNS
+        .map(c => `<th data-key="${c.key}">${c.label}</th>`)
+        .join("");
+      tr.querySelectorAll("th").forEach(th => {
+        th.addEventListener("click", () => {
+          const k = th.dataset.key;
+          if (sortKey === k) sortDir = -sortDir;
+          else { sortKey = k; sortDir = 1; }
+          render();
+        });
+      });
+    }
+
+    function applyFilters() {
+      const search = document.getElementById("f-search").value.trim();
+      const plug = document.getElementById("f-plug").value;
+      const succ = document.getElementById("f-success").value;
+      const fp = document.getElementById("f-force").value;
+      const ranges = {
+        total_score: [num("f-smin"), num("f-smax")],
+        tier3: [num("f-t3min"), num("f-t3max")],
+        duration_s: [num("f-dmin"), num("f-dmax")],
+      };
+      filtered = episodes.filter(e => {
+        if (search && !String(e.trial).includes(search)) return false;
+        if (plug && e.plug_type !== plug) return false;
+        if (succ !== "" && String(e.success) !== succ) return false;
+        if (fp !== "" && String(e.force_penalized || 0) !== fp) return false;
+        for (const [k, [lo, hi]] of Object.entries(ranges)) {
+          if (lo != null && e[k] < lo) return false;
+          if (hi != null && e[k] > hi) return false;
+        }
+        return true;
+      });
+      filtered.sort((a, b) => {
+        const av = a[sortKey], bv = b[sortKey];
+        if (av < bv) return -sortDir;
+        if (av > bv) return sortDir;
+        return 0;
+      });
+    }
+
+    function num(id) {
+      const v = document.getElementById(id).value;
+      return v === "" ? null : Number(v);
+    }
+
+    function render() {
+      applyFilters();
+      document.getElementById("count").textContent = `${filtered.length} / ${episodes.length}`;
+      document.querySelectorAll("th").forEach(th => {
+        th.classList.remove("sort-asc", "sort-desc");
+        if (th.dataset.key === sortKey) th.classList.add(sortDir > 0 ? "sort-asc" : "sort-desc");
+      });
+      const tbody = document.getElementById("rows");
+      tbody.innerHTML = filtered.map(e => {
+        const tds = COLUMNS.map(c => `<td>${c.fmt(e[c.key])}</td>`).join("");
+        const sel = e.trial === selected ? " selected" : "";
+        const disabled = e.rrd ? "" : " no-rrd";
+        return `<tr class="${(sel + disabled).trim()}" data-ep="${e.trial}" data-rrd="${e.rrd || ""}">${tds}</tr>`;
+      }).join("");
+      tbody.querySelectorAll("tr").forEach(tr => {
+        tr.addEventListener("click", () => {
+          const rrd = tr.dataset.rrd;
+          if (!rrd) return;
+          loadEpisode(Number(tr.dataset.ep), rrd);
+        });
+      });
+    }
+
+    async function loadEpisode(ep, rrd) {
+      selected = ep;
+      const url = new URL(rrd, location.href).toString();
+      if (!viewer) {
+        document.getElementById("empty").style.display = "none";
+        const container = document.getElementById("viewer");
+        container.style.display = "block";
+        viewer = new WebViewer();
+        await viewer.start(url, container, { hide_welcome_screen: true });
+      } else {
+        if (currentRrd) viewer.close(currentRrd);
+        viewer.open(url);
+      }
+      currentRrd = url;
+      // re-highlight without full re-render
+      document.querySelectorAll("tbody tr").forEach(tr => {
+        tr.classList.toggle("selected", Number(tr.dataset.ep) === ep);
+      });
+    }
+
+    async function main() {
+      buildHead();
+      const data = await fetch("index.json?t=" + Date.now()).then(r => r.json());
+      episodes = data.episodes || [];
+      if (data.dataset) {
+        document.getElementById("title").innerHTML =
+          `${data.dataset} <span class="count" id="count">…</span>`;
+      }
+      const plugSel = document.getElementById("f-plug");
+      const plugs = [...new Set(episodes.map(e => e.plug_type))].sort();
+      for (const p of plugs) {
+        const o = document.createElement("option");
+        o.value = p; o.textContent = p;
+        plugSel.appendChild(o);
+      }
+      for (const id of ["f-search", "f-plug", "f-success", "f-force",
+                        "f-smin", "f-smax", "f-t3min", "f-t3max",
+                        "f-dmin", "f-dmax"]) {
+        document.getElementById(id).addEventListener("input", render);
+      }
+      render();
+    }
+
+    main().catch(e => {
+      console.error(e);
+      document.getElementById("empty").textContent = "failed to load — see console";
+    });
+  </script>
+</body>
+</html>

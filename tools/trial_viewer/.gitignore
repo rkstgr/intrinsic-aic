@@ -1,0 +1,9 @@
+# Trajectory data is published separately on Hugging Face.
+viewer/index.json
+viewer/rrd/
+
+# Python / pixi artifacts
+__pycache__/
+*.pyc
+.pixi/
+*.rrd.bak
