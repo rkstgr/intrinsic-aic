@@ -113,6 +113,13 @@
   <script type="module">
     import { WebViewer } from "https://unpkg.com/@rerun-io/web-viewer@0.26.2/index.js";
 
+    const DEFAULT_BASE = "https://huggingface.co/datasets/rkstgr/aic-cheatcode-rollouts-v1/resolve/main/";
+    const rawBase = new URLSearchParams(location.search).get("base") || DEFAULT_BASE;
+    const DATA_BASE = (() => {
+      const u = new URL(rawBase, location.href).toString();
+      return u.endsWith("/") ? u : u + "/";
+    })();
+
     const COLUMNS = [
       { key: "trial",        label: "trial",   fmt: v => v },
       { key: "plug_type",    label: "plug",    fmt: v => `<span class="pill pill-${v}">${v}</span>` },
@@ -210,7 +217,7 @@
 
     async function loadEpisode(ep, rrd) {
       selected = ep;
-      const url = new URL(rrd, location.href).toString();
+      const url = new URL(rrd, DATA_BASE).toString();
       if (!viewer) {
         document.getElementById("empty").style.display = "none";
         const container = document.getElementById("viewer");
@@ -230,7 +237,8 @@
 
     async function main() {
       buildHead();
-      const data = await fetch("index.json?t=" + Date.now()).then(r => r.json());
+      const indexUrl = new URL("index.json", DATA_BASE).toString() + "?t=" + Date.now();
+      const data = await fetch(indexUrl).then(r => r.json());
       episodes = data.episodes || [];
       if (data.dataset) {
         document.getElementById("title").innerHTML =

@@ -23,24 +23,54 @@ pinned to `0.26.2`.
 
 ## Quick start
 
+By default the viewer streams `index.json` and each `.rrd` directly from the
+public HF dataset — no local copy needed:
+
 ```bash
-cd tools/trial_viewer
-
-# fetch the trajectories from HF into viewer/
-pip install huggingface_hub
-huggingface-cli download rkstgr/aic-cheatcode-rollouts-v1 \
-  --repo-type dataset --local-dir viewer/
-
-# serve and open
-cd viewer && python -m http.server 8000
+cd tools/trial_viewer/viewer
+python -m http.server 8000
 # → http://localhost:8000/
 ```
 
-If you're already on a remote host, SSH-forward the port:
+If you're on a remote host, SSH-forward the port:
 
 ```bash
 ssh -L 8000:localhost:8000 <user>@<host>
 ```
+
+### Pointing at a different data source
+
+The data base URL is configurable via the `?base=` query param. Any URL ending
+without `/` will have one appended:
+
+```
+# local copy in the same dir as index.html (legacy behaviour)
+http://localhost:8000/?base=./
+
+# a different HF dataset
+http://localhost:8000/?base=https://huggingface.co/datasets/<user>/<name>/resolve/main/
+```
+
+To work fully offline, pre-fetch the dataset and pass `?base=./`:
+
+```bash
+pip install huggingface_hub
+huggingface-cli download rkstgr/aic-cheatcode-rollouts-v1 \
+  --repo-type dataset --local-dir viewer/
+```
+
+## Deploying to Vercel
+
+The viewer is fully static, so a free-tier Vercel project works:
+
+1. Connect the repo on vercel.com.
+2. **Root Directory** → `tools/trial_viewer/viewer`
+3. Framework Preset: **Other** (no build step). `vercel.json` is already in
+   place; output is the directory itself.
+4. Deploy.
+
+All trajectory bytes are served from HF — Vercel only ships ~12 KB of HTML/JS
+per visitor.
 
 ## Pipeline
 
