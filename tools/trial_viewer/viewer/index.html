@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>LeWM trial browser</title>
+  <title>intrinsic-aic</title>
   <style>
     :root {
       --bg: #0f1419;
@@ -18,9 +18,21 @@
     html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--fg); font-size: 13px; }
     #app { display: flex; height: 100vh; }
     #left  { width: 520px; min-width: 360px; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--panel); }
+    #left.collapsed { width: 36px; min-width: 36px; }
+    #left.collapsed > :not(#sidebar-header) { display: none; }
+    #left.collapsed #sidebar-header { border-bottom: none; justify-content: center; }
+    #left.collapsed #sidebar-header h1 { display: none; }
+    #left.collapsed #toggle-sidebar { padding: 10px; }
     #right { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
-    h1 { font-size: 14px; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600; }
+    #sidebar-header { display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+    h1 { font-size: 14px; margin: 0; padding: 10px 14px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     h1 span.count { color: var(--muted); font-weight: 400; margin-left: 6px; }
+    #toggle-sidebar { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 8px 12px; line-height: 1; }
+    #toggle-sidebar:hover { color: var(--fg); }
+    #dataset-info { padding: 6px 14px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #dataset-info a { color: var(--accent); text-decoration: none; }
+    #dataset-info a:hover { text-decoration: underline; }
+    #dataset-info .commit { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
     #filters { padding: 10px 14px; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
     #filters label { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
     #filters input, #filters select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font: inherit; margin-top: 2px; }
@@ -50,7 +62,11 @@
 <body>
   <div id="app">
     <div id="left">
-      <h1 id="title">trials <span class="count" id="count">…</span></h1>
+      <div id="sidebar-header">
+        <h1 id="title">intrinsic-aic <span class="count" id="count">…</span></h1>
+        <button id="toggle-sidebar" type="button" title="Collapse sidebar" aria-label="Collapse sidebar">‹</button>
+      </div>
+      <div id="dataset-info">…</div>
       <div id="filters">
         <label>trial contains
           <input type="text" id="f-search" placeholder="e.g. 7">
@@ -235,15 +251,55 @@
       });
     }
 
+    function parseHfBase(base) {
+      const m = base.match(/^https:\/\/huggingface\.co\/datasets\/([^\/]+\/[^\/]+)\/resolve\/([^\/]+)\//);
+      return m ? { repo: m[1], rev: m[2] } : null;
+    }
+
+    async function populateDatasetInfo(commitFromHeader) {
+      const el = document.getElementById("dataset-info");
+      const hf = parseHfBase(DATA_BASE);
+      if (!hf) {
+        el.textContent = `data: ${DATA_BASE}`;
+        return;
+      }
+      let commit = commitFromHeader;
+      if (!commit) {
+        try {
+          const r = await fetch(`https://huggingface.co/api/datasets/${hf.repo}/revision/${hf.rev}`);
+          if (r.ok) commit = (await r.json()).sha;
+        } catch { /* fall through to rev label */ }
+      }
+      const short = commit ? commit.slice(0, 7) : null;
+      const treeUrl = `https://huggingface.co/datasets/${hf.repo}/tree/${commit || hf.rev}`;
+      const label = short
+        ? `@ <span class="commit">${short}</span>`
+        : `@ ${hf.rev}`;
+      el.innerHTML = `<a href="${treeUrl}" target="_blank" rel="noopener">${hf.repo}</a> ${label}`;
+    }
+
+    function wireSidebarToggle() {
+      const left = document.getElementById("left");
+      const btn = document.getElementById("toggle-sidebar");
+      btn.addEventListener("click", () => {
+        const collapsed = !left.classList.contains("collapsed");
+        left.classList.toggle("collapsed", collapsed);
+        btn.textContent = collapsed ? "›" : "‹";
+        const label = collapsed ? "Show sidebar" : "Collapse sidebar";
+        btn.title = label;
+        btn.setAttribute("aria-label", label);
+      });
+    }
+
     async function main() {
       buildHead();
+      wireSidebarToggle();
       const indexUrl = new URL("index.json", DATA_BASE).toString() + "?t=" + Date.now();
-      const data = await fetch(indexUrl).then(r => r.json());
+      const res = await fetch(indexUrl);
+      const commitHeader = res.headers.get("x-repo-commit");
+      const data = await res.json();
       episodes = data.episodes || [];
-      if (data.dataset) {
-        document.getElementById("title").innerHTML =
-          `${data.dataset} <span class="count" id="count">…</span>`;
-      }
+      populateDatasetInfo(commitHeader);
       const plugSel = document.getElementById("f-plug");
       const plugs = [...new Set(episodes.map(e => e.plug_type))].sort();
       for (const p of plugs) {
