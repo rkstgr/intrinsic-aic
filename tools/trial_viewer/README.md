@@ -83,6 +83,7 @@ need the AIC eval sim and its pixi environment to actually run.
 | `record_smoke_runner.sh` | Orchestrates N trials end-to-end (gen config → sim → policy → recorder → score). Honors `IMAGE_HW=512x576`, `TRIAL_PREFIX=trial_`. |
 | `compress_rrds.py` | Replaces per-frame PNG image streams with AV1-encoded MP4 (`AssetVideo` + `VideoFrameReference`). ~100× smaller. |
 | `trim_rrds.py` | Trims each `.rrd` to the motion-relevant window using smoothed TCP velocity. Re-encodes the camera segment with `libsvtav1`. |
+| `enrich_rrds.py` | Adds derived diagnostic series to each trimmed `.rrd`: per-axis wrench force split (`force/x|y|z`), `force_lateral_norm = √(Fx²+Fy²)`, `tcp/error_pos_norm`, and `command/lin_vel_residual` (commanded − measured TCP velocity, per axis + norm). Originals pass through unchanged. |
 | `build_index_from_eval.py` | Builds `index.json` from `eval/runs/<run>/iter_NN/{summary,scoring}.yaml` + `recorder.json` and the trimmed `.rrd` durations. |
 | `aic_ros_bridge.py` | Shared ROS subscriber used by `record_trial.py`. |
 | `dump_rrd.py` | Legacy converter for the LeRobotDataset exploration data — not used by the current pipeline. |
@@ -94,14 +95,45 @@ need the AIC eval sim and its pixi environment to actually run.
 IMAGE_HW=512x576 TRIAL_PREFIX=trial_ \
   bash pipeline/record_smoke_runner.sh 20 42
 
-# compress, trim, re-index
+# compress, trim, enrich, re-index
 pixi run python pipeline/compress_rrds.py --preset 10
 pixi run python pipeline/trim_rrds.py
+pixi run python pipeline/enrich_rrds.py
 pixi run python pipeline/build_index_from_eval.py \
   --csv  ~/lewm_run/eval/cheatcode_record_<TS>.csv \
   --run-dir ~/lewm_run/eval/runs/cheatcode_record_<TS> \
   --rrd-prefix trial_
 ```
+
+### Re-enriching the published v1 dataset
+
+If you only want to refresh derived signals on the already-published rrds
+without re-recording:
+
+```bash
+# 1. pull the current dataset to a working dir
+huggingface-cli download rkstgr/aic-cheatcode-rollouts-v1 \
+  --repo-type dataset --local-dir /tmp/aic-rollouts
+
+# 2. enrich in place
+pixi run python tools/trial_viewer/pipeline/enrich_rrds.py \
+  --rrd-dir /tmp/aic-rollouts
+
+# 3. eyeball locally. Easiest: stage the enriched data alongside index.html
+#    and use ?base=./ (same-origin, no CORS dance).
+cp /tmp/aic-rollouts/index.json /tmp/aic-rollouts/*.rrd \
+   tools/trial_viewer/viewer/
+cd tools/trial_viewer/viewer && python -m http.server 8000
+# → http://localhost:8000/?base=./
+
+# 4. push back. Token via `huggingface-cli login` once; do not paste in chat.
+huggingface-cli upload rkstgr/aic-cheatcode-rollouts-v1 /tmp/aic-rollouts . \
+  --repo-type dataset \
+  --commit-message "enrich rrds with derived diagnostic signals"
+```
+
+The viewer's dataset-info row will pick up the new commit SHA on next
+load — no Vercel redeploy needed.
 
 ## Known limitations
 
