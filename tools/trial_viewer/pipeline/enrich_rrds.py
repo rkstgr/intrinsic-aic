@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Enrich each trimmed trial .rrd with derived diagnostic signals.
 
+NOTE (legacy): This script was used to retroactively add derived signals to
+the v1 HF dataset (aic-cheatcode-rollouts-v1). New recordings made with the
+updated record_trial.py already include per-axis force, pose targets,
+residuals, and 3D entities at capture time, so this script is no longer
+needed for fresh data. Kept for one-off migration of older RRDs only.
+
 Adds the following entities alongside the originals (which pass through
 unchanged):
 
