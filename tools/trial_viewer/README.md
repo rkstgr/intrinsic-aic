@@ -79,7 +79,7 @@ need the AIC eval sim and its pixi environment to actually run.
 
 | script | purpose |
 |---|---|
-| `record_trial.py` | Subscribes to `/observations`, `/aic_controller/{controller_state,pose_commands}`, `/fts_broadcaster/wrench` from a live AIC trial. Writes a raw `.rrd` with PNG-encoded camera frames. |
+| `record_trial.py` | Subscribes to `/observations`, `/aic_controller/{controller_state,pose_commands}`, `/fts_broadcaster/wrench` from a live AIC trial. Writes a raw `.rrd` with PNG-encoded camera frames, per-axis force splits, derived diagnostic scalars (`force_lateral_norm`, `error_pos_norm`, `pos_residual`, `lin_vel_residual`), action pose + velocity targets, and 3-D entities (TCP path, pose-target path, force arrow). |
 | `record_smoke_runner.sh` | Orchestrates N trials end-to-end (gen config → sim → policy → recorder → score). Honors `IMAGE_HW=512x576`, `TRIAL_PREFIX=trial_`. |
 | `compress_rrds.py` | Replaces per-frame PNG image streams with AV1-encoded MP4 (`AssetVideo` + `VideoFrameReference`). ~100× smaller. |
 | `trim_rrds.py` | Trims each `.rrd` to the motion-relevant window using smoothed TCP velocity. Re-encodes the camera segment with `libsvtav1`. |
@@ -112,7 +112,11 @@ pixi run python pipeline/build_index_from_eval.py \
   directly. The AIC scoring uses `wrench − fts_tare_offset`. Use the
   `force_penalized` column in `index.json` (parsed from `scoring.yaml`) for
   the canonical "was this trial force-penalized?" answer.
-- **Velocity-action only.** `record_trial.py` subscribes to
-  `MotionUpdate.velocity`; `CheatCode` commands `MotionUpdate.pose`, so
-  `action/linear` and `action/angular` in current rrds are all zero. A
-  future recorder update should also log `.pose`.
+- **v1 dataset is velocity-action-only.** The recorder used for
+  `aic-cheatcode-rollouts-v1` only captured `MotionUpdate.velocity`;
+  CheatCode commands `MotionUpdate.pose`, so `action/linear` and
+  `action/angular` in those rrds are all zero. The current
+  `record_trial.py` logs both `.pose` and `.velocity` plus the
+  trajectory mode, and the pose-mode residual (`command/pos_residual`)
+  is the useful one for CheatCode. Re-record to produce a corrected
+  dataset.
